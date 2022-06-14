@@ -11,6 +11,7 @@ class Softmax(tf.Module):
         :param Y: [*, B, N, 1]
         :return: log likelihood \log p(Y|F) whose shape is [*, B, N]
         """
+        Y = tf.cast(Y, tf.int32)
         return - tf.nn.sparse_softmax_cross_entropy_with_logits(labels=Y[:, 0], logits=F)
 
     def predict_full(self, F):
