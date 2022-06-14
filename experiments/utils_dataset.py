@@ -14,7 +14,7 @@ def load_UCI_data(name, data_path='./data/'):
     return X, Y, Xs, Ys, X_mean, X_std, Y_mean
 
 
-def load_dataset(dataset_name, batch_size, transform_fn=None, data_dir='./tensorflow_datasets/'):
+def load_dataset(dataset_name, batch_size=128, transform_fn=None, data_dir='./tensorflow_datasets/'):
     ds_train, ds_info = tfds.load(dataset_name, split='train', shuffle_files=True,
                                   data_dir=data_dir, as_supervised=True, with_info=True)
     ds_test = tfds.load(dataset_name, split='test', shuffle_files=True,
@@ -28,7 +28,7 @@ def load_dataset(dataset_name, batch_size, transform_fn=None, data_dir='./tensor
     ds_test = ds_test.shuffle(test_full_size)
     ds_train = ds_train.batch(batch_size)
     ds_test = ds_test.batch(batch_size)
-    return ds_train, ds_test  # return tf.data.Dataset as iterable
+    return ds_train, ds_test, train_full_size, test_full_size # return tf.data.Dataset as iterable and full data size
 
 def normalize_MNIST(img, label):
     img = tf.cast(tf.reshape(img, [28 * 28]), tf.float32) / 255. - 0.5
