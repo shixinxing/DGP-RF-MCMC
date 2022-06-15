@@ -1,5 +1,4 @@
 import tensorflow as tf
-import numpy as np
 from likelihoods import Softmax, Gaussian
 from kernels import RBFKernel
 from layers import RBFLayer, GPLayer
@@ -34,7 +33,7 @@ class DGP_RF(tf.Module):
         self.likelihood = likelihood
         if kernel_list is None:
             before_n_rf = tf.concat([[d_in], self.n_gp[:-1]], axis=0)
-            self.kernel_list = [ RBFKernel(n_feature=before_n_rf[i]) for i in range(n_hidden_layers) ]
+            self.kernel_list = [ RBFKernel(n_feature=before_n_rf[i], trainable=True, is_ard=True) for i in range(n_hidden_layers) ]
         else:
             self.kernel_list = kernel_list
         self.random_fixed = random_fixed
@@ -62,8 +61,6 @@ class DGP_RF(tf.Module):
         :param Y: [N, D_out]
         :return: [N, ]
         """
-        X = tf.constant(X, dtype=tf.float32)
-        Y = tf.constant(Y, dtype=tf.float32)
         F = self.BNN(X)
         log_likelihood = self.likelihood.log_prob(F, Y)
         return log_likelihood
@@ -105,7 +102,10 @@ class DGP_RF(tf.Module):
         batch_size = tf.shape(X_batch)[0]
         batch_size = tf.cast(batch_size, tf.float32)
         data_size = tf.cast(data_size, tf.float32)
-        log_prior_sum = (self.prior_W() + self.prior_kernel_params() + self.prior_likelihood_params()) / data_size
+        # log_prior_sum = (self.prior_W() + self.prior_kernel_params() + self.prior_likelihood_params()) / data_size
+        log_prior_sum = 0.
+        for param in self.trainable_variables:
+            log_prior_sum += tf.reduce_sum(log_gaussian(param, mean=0., var=1.)) / data_size
         log_likelihood = tf.reduce_sum(self.log_likelihood(X_batch, Y_batch)) / batch_size
         return - (log_prior_sum + log_likelihood)
 
