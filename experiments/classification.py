@@ -31,11 +31,31 @@ class ClassificationDGP(DGP_RF):
         acc = right / tf.cast(tf.shape(X_batch)[0], tf.float32)
         return acc
 
+    def eval_test_all(self, ds_test):
+        right = 0.
+        test_size = 0.
+        for img_batch, label_batch in ds_test:
+            batch_size = tf.cast(tf.shape(img_batch)[0], tf.float32)
+            right += self.eval_accuracy(img_batch, label_batch) * batch_size
+            test_size += batch_size
+        # print(f"Total rights on test: {right}, test size: {test_size} ")
+        acc_test_all = right / test_size
+        return  acc_test_all
+
+    def eval_test_free_random(self,ds_test):
+        self.BNN.set_random_fixed(False)
+        acc =  self.eval_test_all(ds_test)
+        self.BNN.set_random_fixed(True)
+        return acc
+
+
 batch_size = 128
 ds_train, ds_test, train_full_size, test_full_size = load_dataset('mnist', batch_size=batch_size,
                                                                   transform_fn=normalize_MNIST)
+
 ds_M = ds_train
-model = ClassificationDGP(28*28, 10, n_hidden_layers=2, n_rf=50, n_gp=[30,10], likelihood=Softmax())
+model = ClassificationDGP(28*28, 10, n_hidden_layers=2, n_rf=500, n_gp=[50, 10], likelihood=Softmax(),
+                          random_fixed=True)
 
 total_epoches = 1500
 start_sampling = 150
@@ -44,24 +64,33 @@ beta = 0.98
 cycle_length = 50
 
 for epoch in range(total_epoches):
-    model.precond_update(ds_M, train_full_size, K_batches=32, precond_type='rmsprop', rho_rms=0.99)
-    iteration = 0
+    model.precond_update(ds_M, train_full_size, K_batches=32, precond_type='adagrad', rho_rms=0.99)
     acc = 0.
     for img_batch, label_batch in ds_train:
         if epoch < start_sampling: # fixed learning rate, zero temperature
             model.sgmcmc_update(img_batch, label_batch, train_full_size,
                                 lr=lr_0, beta=beta, temperature=0.)
-            acc = model.eval_accuracy(img_batch, label_batch)
+            # acc = model.eval_accuracy(img_batch, label_batch)
             # print(f"Epoch: {epoch}, Iter: {iteration}, lr: {lr_0}, Acc: {acc}  ")
-            iteration += 1
         else: # cyclical learning rate, non-zero temperature
             lr = cyclical_lr_schedule(lr_0, epoch - start_sampling, cycle_length)
             model.sgmcmc_update(img_batch, label_batch, train_full_size,
                                 lr=lr, beta=beta, temperature=1.)
-            acc = model.eval_accuracy(img_batch, label_batch)
+            # acc = model.eval_accuracy(img_batch, label_batch)
             # print(f"Epoch: {epoch}, Iter: {iteration}, lr: {lr}, Acc: {acc}  ")
-            iteration += 1
-    print(f"Epoch: {epoch}, Iter: {iteration}, lr: {lr_0}, Acc: {acc}  ")
+
+    if epoch < start_sampling:
+        lr_current = lr_0
+    else:
+        lr_current = lr
+        # acc = model.eval_accuracy(img_batch, label_batch)
+        # print(f"Epoch: {epoch}, Iter: {iteration}, lr: {lr_0}, Batch Acc: {acc}  ")
+    train_acc = model.eval_test_all(ds_train)
+    test_acc = model.eval_test_all(ds_test)
+    print(f"On training data, Epoch: {epoch},  lr: {lr_current}, Total Acc: {train_acc}  ")
+    print(f"On test data, Epoch: {epoch},  lr: {lr_current}, Total Acc: {test_acc}  ")
+
+
 
 
 
