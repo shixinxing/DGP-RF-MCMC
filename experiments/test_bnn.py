@@ -2,19 +2,14 @@ import sys
 sys.path.append("..")
 import tensorflow as tf
 
-from dgp import DGP_RF
-from likelihoods import Softmax
+from BNN_test import BNNTest
 from utils_dataset import load_dataset, normalize_MNIST
 from utils import cyclical_lr_schedule
 
 
-class ClassificationDGP(DGP_RF):
-    def __init__(self, d_in, d_out, n_hidden_layers=1, n_rf=30, n_gp=10, likelihood=Softmax(),
-                 kernel_type_list=None, random_fixed=True, input_cat=False, name=None):
-        super(ClassificationDGP, self).__init__(d_in, d_out, n_hidden_layers=n_hidden_layers,
-                                            n_rf=n_rf, n_gp=n_gp,
-                                            likelihood=likelihood, kernel_type_list=kernel_type_list,
-                                            input_cat=input_cat, random_fixed=random_fixed, name=name)
+class ClassificationBNN(BNNTest):
+    def __init__(self):
+        super(ClassificationBNN, self).__init__()
 
     def eval_accuracy(self, X_batch, Y_batch):
         """
@@ -22,8 +17,8 @@ class ClassificationDGP(DGP_RF):
         :param Y_batch: [N, 1]
         :return: acc give one sample set of params in BNN
         """
-        out = self.BNN(X_batch)
-        out = self.likelihood.predict_full(out) #[N, num_class], float32
+        out = self.__call__(X_batch)
+        out = tf.nn.softmax(out) #[N, num_class], float32
         predicts = tf.cast(tf.math.argmax(out, axis=-1), tf.float32) #[N], int
         labels = tf.squeeze(Y_batch) #[N], float
         right_index = tf.cast(predicts == labels, tf.float32)
@@ -40,21 +35,14 @@ class ClassificationDGP(DGP_RF):
             test_size += batch_size
         print(f"Total rights: {right}, test size: {test_size} ")
         acc_test_all = right / test_size
-        return  acc_test_all
-
-    def eval_test_free_random(self,ds_test):
-        self.BNN.set_random_fixed(False)
-        acc =  self.eval_test_all(ds_test)
-        self.BNN.set_random_fixed(True)
-        return acc
+        return acc_test_all
 
 
 batch_size = 128
 ds_train, ds_test, train_full_size, test_full_size = load_dataset('mnist', batch_size=batch_size,
                                                                   transform_fn=normalize_MNIST)
 ds_M = ds_train
-model = ClassificationDGP(28*28, 10, n_hidden_layers=3, n_rf=500, n_gp=[1000, 100, 10], likelihood=Softmax(),
-                          kernel_type_list=None, random_fixed=True, input_cat=True)
+model = ClassificationBNN()
 
 total_epoches = 1500
 start_sampling = 150
@@ -89,8 +77,6 @@ for epoch in range(total_epoches):
     test_acc = model.eval_test_all(ds_test)
     print(f"On test data, Epoch: {epoch},  lr: {lr_current}, Total Acc: {test_acc}  ")
     print(" ")
-
-
 
 
 
