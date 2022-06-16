@@ -2,12 +2,12 @@ import tensorflow as tf
 from likelihoods import Softmax, Gaussian
 from kernels import RBFKernel
 from layers import RBFLayer, GPLayer
-from utils import BNN_from_list, log_gaussian
+from utils import BNN_from_list, BNN_from_list_input_cat, log_gaussian
 
 
 class DGP_RF(tf.Module):
     def __init__(self, d_in, d_out, n_hidden_layers=1, n_rf=20, n_gp=2, likelihood=Softmax(),
-                 kernel_list=None, random_fixed=True, name=None):
+                 kernel_type_list=None, random_fixed=True, input_cat=False, name=None):
         """
         :param d_in: Input dim
         :param d_out: Output dim
@@ -17,11 +17,15 @@ class DGP_RF(tf.Module):
         :param likelihood: Likelihood class in the last layer
         :param kernel: determine is_ard via the length scale params
         :param random_fixed: z fixed or not when feeding forward
+        :param input_cat: concatenate input to each hidden layer except the final layer
         """
         super(DGP_RF, self).__init__(name=name)
         self.d_in = d_in
         self.d_out = d_out
         self.n_hidden_layers = n_hidden_layers
+        self.random_fixed = random_fixed
+        self.input_cat = input_cat
+
         if tf.rank(n_rf) == 0:
             self.n_rf = n_rf * tf.ones([n_hidden_layers], dtype=tf.int32) #[20, 20]
         else:
@@ -30,14 +34,29 @@ class DGP_RF(tf.Module):
             self.n_gp = n_gp * tf.ones([n_hidden_layers], dtype=tf.int32) #[2, 2]
         else:
             self.n_gp = tf.constant(n_gp)
+
         self.likelihood = likelihood
-        if kernel_list is None:
-            before_n_rf = tf.concat([[d_in], self.n_gp[:-1]], axis=0)
-            self.kernel_list = [ RBFKernel(n_feature=before_n_rf[i], trainable=True, is_ard=True) for i in range(n_hidden_layers) ]
+        if kernel_type_list is None:
+            self.kernel_type_list = ['RBF' for _ in range(n_hidden_layers)]
         else:
-            self.kernel_list = kernel_list
-        self.random_fixed = random_fixed
+            assert len(kernel_type_list) == n_hidden_layers, "Knernel type list's length does not match!"
+            self.kernel_type_list = kernel_type_list
+        self.kernel_list = self.transform_kernel_list()
         self.BNN = self.transformed_BNN()
+
+    def transform_kernel_list(self):
+        kernel_list = []
+        if not self.input_cat:
+            before_n_rf = tf.concat([[self.d_in], self.n_gp[:-1]], axis=0)
+        else:
+            before_n_rf = tf.concat([[self.d_in], [n_gp + self.d_in for n_gp in self.n_gp[:-1]]], axis=0)
+        for i, kernel_type in enumerate(self.kernel_type_list):
+            if kernel_type == 'RBF':
+                kernel = RBFKernel(n_feature=before_n_rf[i], trainable=True, is_ard=True)
+                kernel_list.append(kernel)
+            else:
+                raise NotImplementedError
+        return kernel_list
 
     def transformed_BNN(self):
         """
@@ -52,7 +71,11 @@ class DGP_RF(tf.Module):
                 bnn.extend([layer_Omega, layer_GP])
             else:
                 raise  NotImplementedError
-        return BNN_from_list(bnn)
+        if not self.input_cat:
+            return BNN_from_list(bnn)
+        else:
+            return BNN_from_list_input_cat(bnn)
+        # else: # add input concatenation
 
     def log_likelihood(self, X, Y):
         """

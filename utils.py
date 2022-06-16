@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+from layers import RBFLayer, GPLayer
 
 class BNN_from_list(tf.Module):
     def __init__(self, layer_list, name=None):
@@ -13,9 +14,27 @@ class BNN_from_list(tf.Module):
 
     def set_random_fixed(self, state):
         for layer in self.layers:
-            if hasattr(layer, 'random_fixed'):
+            if isinstance(layer, RBFLayer):
+                assert hasattr(layer, 'random_fixed'), "Layers cannot set random_fixed!"
                 layer.set_random_fixed(state)
 
+class BNN_from_list_input_cat(BNN_from_list):
+    def __init__(self, layer_list, name=None):
+        super(BNN_from_list_input_cat, self).__init__(layer_list, name=name)
+
+    def __call__(self, X):
+        total_layers = len(self.layers)
+        F = X
+        for l, layer in enumerate(self.layers):
+            if l == 0 or l == total_layers - 1:
+                F = layer(F)
+            else:
+                if isinstance(layer, GPLayer):
+                    F = layer(F)
+                else: # input concatenate
+                    F = tf.concat([F, X], axis=-1)
+                    F = layer(F)
+        return F
 
 def log_gaussian(x, mean=0., var=1.):
     return - 0.5 * (tf.math.log(2. * np.pi) + tf.math.log(var) + tf.square(x - mean) / var)
