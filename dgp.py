@@ -1,13 +1,13 @@
 import tensorflow as tf
 from likelihoods import Softmax, Gaussian
-from kernels import RBFKernel
-from layers import RBFLayer, GPLayer
+from kernels import RBFKernel, ARCKernel
+from layers import RBFLayer, ARCLayer, GPLayer
 from utils import BNN_from_list, BNN_from_list_input_cat, log_gaussian
 
 
 class DGP_RF(tf.Module):
     def __init__(self, d_in, d_out, n_hidden_layers=1, n_rf=20, n_gp=2, likelihood=Softmax(),
-                 kernel_type_list=None, random_fixed=True, input_cat=False, name=None):
+                 kernel_type_list=None, random_fixed=True, input_cat=False, set_nonzero_mean=False, name=None):
         """
         :param d_in: Input dim
         :param d_out: Output dim
@@ -25,6 +25,7 @@ class DGP_RF(tf.Module):
         self.n_hidden_layers = n_hidden_layers
         self.random_fixed = random_fixed
         self.input_cat = input_cat
+        self.set_nonzero_mean = set_nonzero_mean
 
         if tf.rank(n_rf) == 0:
             self.n_rf = n_rf * tf.ones([n_hidden_layers], dtype=tf.int32) #[20, 20]
@@ -38,8 +39,9 @@ class DGP_RF(tf.Module):
         self.likelihood = likelihood
         if kernel_type_list is None:
             self.kernel_type_list = ['RBF' for _ in range(n_hidden_layers)]
+            # self.kernel_type_list = ['ARC' for _ in range(n_hidden_layers)]
         else:
-            assert len(kernel_type_list) == n_hidden_layers, "Knernel type list's length does not match!"
+            assert len(kernel_type_list) == n_hidden_layers, "Kernel type list's length does not match!"
             self.kernel_type_list = kernel_type_list
         self.kernel_list = self.transform_kernel_list()
         self.BNN = self.transformed_BNN()
@@ -54,6 +56,9 @@ class DGP_RF(tf.Module):
             if kernel_type == 'RBF':
                 kernel = RBFKernel(n_feature=before_n_rf[i], trainable=True, is_ard=True)
                 kernel_list.append(kernel)
+            elif kernel_type == 'ARC':
+                kernel = ARCKernel(n_feature=before_n_rf[i], trainable=True, is_ard=True)
+                kernel_list.append(kernel)
             else:
                 raise NotImplementedError
         return kernel_list
@@ -66,11 +71,17 @@ class DGP_RF(tf.Module):
         for l in range(self.n_hidden_layers):
             kernel_tmp = self.kernel_list[l]
             if kernel_tmp.kernel_type == "RBF":
-                layer_Omega = RBFLayer(kernel_tmp, self.n_rf[l], random_fixed=self.random_fixed)
+                layer_Omega = RBFLayer(kernel_tmp, self.n_rf[l], random_fixed=self.random_fixed,
+                                       set_nonzero_mean=self.set_nonzero_mean)
                 layer_GP = GPLayer(2 * self.n_rf[l], self.n_gp[l])
-                bnn.extend([layer_Omega, layer_GP])
+            elif kernel_tmp.kernel_type == "ARC":
+                layer_Omega = ARCLayer(kernel_tmp, self.n_rf[l], random_fixed=self.random_fixed,
+                                       set_nonzero_mean=self.set_nonzero_mean)
+                layer_GP = GPLayer(self.n_rf[l], self.n_gp[l])
             else:
                 raise  NotImplementedError
+            bnn.extend([layer_Omega, layer_GP])
+
         if not self.input_cat:
             return BNN_from_list(bnn)
         else:

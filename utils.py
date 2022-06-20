@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from layers import RBFLayer, GPLayer
+from layers import RBFLayer, ARCLayer, GPLayer
 
 class BNN_from_list(tf.Module):
     def __init__(self, layer_list, name=None):
@@ -14,7 +14,7 @@ class BNN_from_list(tf.Module):
 
     def set_random_fixed(self, state):
         for layer in self.layers:
-            if isinstance(layer, RBFLayer):
+            if isinstance(layer, RBFLayer) or isinstance(layer, ARCLayer):
                 assert hasattr(layer, 'random_fixed'), "Layers cannot set random_fixed!"
                 layer.set_random_fixed(state)
 
