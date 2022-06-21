@@ -2,12 +2,12 @@ import sys
 sys.path.append("..")
 import tensorflow as tf
 
-from BNN_test import BNNTest
+from BNN_test import BNNTest, BNNTestCos
 from utils_dataset import load_dataset, normalize_MNIST
 from utils import cyclical_lr_schedule
 
 
-class ClassificationBNN(BNNTest):
+class ClassificationBNN(BNNTestCos): # could change BNNTest or BNNTestCos
     def __init__(self):
         super(ClassificationBNN, self).__init__()
 
@@ -38,14 +38,14 @@ class ClassificationBNN(BNNTest):
         return acc_test_all
 
 
-batch_size = 128
+batch_size = 256
 ds_train, ds_test, train_full_size, test_full_size = load_dataset('mnist', batch_size=batch_size,
                                                                   transform_fn=normalize_MNIST)
 ds_M = ds_train
 model = ClassificationBNN()
 
-total_epoches = 1500
-start_sampling = 150
+total_epoches = 150
+start_sampling = 150  # Acc is over 90% at the third epoch.
 lr_0 = 0.1
 beta = 0.98
 cycle_length = 50
