@@ -133,23 +133,50 @@ class BNNTest(BNNTestBase):
 class BNNTestCos(BNNTestBase):
     def __init__(self):
         super(BNNTestCos, self).__init__()
-        n_rf = 1000
+        n_rf = 10000
         self.w1 = tf.Variable(tf.random.normal([28 * 28, n_rf]))
-        self.w2 = tf.Variable(tf.random.normal([2*n_rf, n_rf]))
-        self.w3 = tf.Variable(tf.random.normal([2*n_rf, n_rf]))
-        self.w4 = tf.Variable(tf.random.normal([2*n_rf, 10]))
+        self.w2 = tf.Variable(tf.random.normal([2*n_rf, 10]))
+        # self.w3 = tf.Variable(tf.random.normal([2*n_rf, n_rf]))
+        # self.w4 = tf.Variable(tf.random.normal([2*n_rf, 10]))
 
     def __call__(self, X):
         y = tf.matmul(X, self.w1)
         y = tf.concat([tf.math.cos(y), tf.math.sin(y)], axis=-1)
         y = tf.matmul(y, self.w2)
-        y = tf.concat([tf.math.cos(y), tf.math.sin(y)], axis=-1)
-        y = tf.matmul(y, self.w3)
-        y = tf.concat([tf.math.cos(y), tf.math.sin(y)], axis=-1)
-        y = tf.matmul(y, self.w4)
+        # y = tf.concat([tf.math.cos(y), tf.math.sin(y)], axis=-1)
+        # y = tf.matmul(y, self.w3)
+        # y = tf.concat([tf.math.cos(y), tf.math.sin(y)], axis=-1)
+        # y = tf.matmul(y, self.w4)
         return y
 
 
+class NNCos(tf.Module):
+    def __init__(self):
+        super(NNCos, self).__init__()
+        n_rf = 10000
+        self.w1 = tf.Variable(tf.random.normal([28 * 28, n_rf]))
+        self.w2 = tf.Variable(tf.random.normal([n_rf, n_rf//10]))
+        self.w3 = tf.Variable(tf.random.normal([n_rf//10, 10]))
+
+    def __call__(self, X):
+        y = tf.matmul(X, self.w1)
+        y = tf.math.sin(y) # or use cos
+        y = tf.matmul(y, self.w2)
+        y = tf.math.sin(y)
+        y = tf.matmul(y, self.w3)
+        return y
+
+    def cross_entropy_loss(self, X_batch, Y_batch):
+        y = self.__call__(X_batch)
+        Y_batch = tf.cast(Y_batch, tf.int32)
+        return - tf.nn.sparse_softmax_cross_entropy_with_logits(labels=Y_batch[:, 0], logits=y)
+
+    def MSE_loss(self, X_batch, Y_batch):
+        y = self.__call__(X_batch)
+        Y_batch = tf.cast(Y_batch, tf.int32)[:, 0]
+        Y_batch = tf.one_hot(Y_batch, 10)
+        loss = tf.reduce_mean(tf.reduce_sum(tf.square(y - Y_batch), axis=-1))
+        return loss
 
 
 
