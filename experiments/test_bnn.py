@@ -1,6 +1,7 @@
 import sys
 sys.path.append("..")
 import tensorflow as tf
+import tensorflow.keras.optimizers as optimizer
 
 from BNN_test import BNNTest, BNNTestCos
 from utils_dataset import load_dataset, normalize_MNIST
@@ -46,10 +47,12 @@ model = ClassificationBNN()
 
 total_epoches = 150
 start_sampling = 150  # Acc is over 90% at the third epoch.
-lr_0 = 0.1
+lr_0 = 0.001
 beta = 0.98
 cycle_length = 50
 
+# for one layer BNN with cos/sin activation, BNN fails to generalize
+# train acc reaches 99+% but test acc remains ~16+%
 for epoch in range(total_epoches):
     model.precond_update(ds_M, train_full_size, K_batches=32, precond_type='rmsprop', rho_rms=0.99)
     acc = 0.
@@ -78,6 +81,22 @@ for epoch in range(total_epoches):
     print(f"On test data, Epoch: {epoch},  lr: {lr_current}, Total Acc: {test_acc}  ")
     print(" ")
 
+# # Use SGD to optimize the parameters rather than MCMC
+# # fail to generalize: train acc reaches 99+%, but test acc remains ~ 14+%
+# opt = optimizer.SGD(learning_rate=lr_0)
+# for epoch in range(total_epoches):
+#     for img_batch, label_batch in ds_train:
+#         with tf.GradientTape() as tape:
+#             loss = model.U(img_batch, label_batch, train_full_size)
+#             # loss = model.MSE_loss(img_batch, label_batch)
+#         grads = tape.gradient(loss, model.trainable_variables)
+#         opt.apply_gradients(zip(grads, model.trainable_variables))
+#
+#     train_acc = model.eval_test_all(ds_train)
+#     print(f"On training data, Epoch: {epoch},  lr: {lr_0}, Total Acc: {train_acc}  ")
+#     test_acc = model.eval_test_all(ds_test)
+#     print(f"On test data, Epoch: {epoch},  lr: {lr_0}, Total Acc: {test_acc}  ")
+#     print(" ")
 
 
 
