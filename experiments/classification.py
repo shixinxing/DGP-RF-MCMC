@@ -53,46 +53,37 @@ batch_size = 256
 ds_train, ds_test, train_full_size, test_full_size = load_dataset('mnist', batch_size=batch_size,
                                                                   transform_fn=normalize_MNIST)
 ds_M = ds_train
-model = ClassificationDGP(28*28, 10, n_hidden_layers=3, n_rf=500, n_gp=[1000, 100, 10], likelihood=Softmax(),
+model = ClassificationDGP(28*28, 10, n_hidden_layers=3, n_rf=500, n_gp=[50, 50, 10], likelihood=Softmax(),
                           kernel_type_list=None, random_fixed=True, set_nonzero_mean=False, input_cat=True)
 
-total_epoches = 5
-start_sampling = 5
-lr_0 = 0.001  # Training acc reaches over 95% very fast.
+total_epoches = 20
+start_sampling = 20
+lr_0 = 0.1  # Training acc reaches over 95% very fast.
 beta = 0.98
-cycle_length = 50
+cycle_length = 100
 
 for epoch in range(total_epoches):
     model.precond_update(ds_M, train_full_size, K_batches=32, precond_type='rmsprop', rho_rms=0.99)
     acc = 0.
-    iteration = 0
     for img_batch, label_batch in ds_train:
         if epoch < start_sampling: # fixed learning rate, zero temperature
             model.sgmcmc_update(img_batch, label_batch, train_full_size,
                                 lr=lr_0, beta=beta, temperature=0.)
-            # test_acc_iter = model.eval_test_all(ds_test)
-            # train_acc_iter = model.eval_test_all(ds_train)
-            # print(f"Epoch: {epoch}, Iter: {iteration}, lr: {lr_0}, Acc on training data: {train_acc_iter}  ")
-            # print(f"Epoch: {epoch}, Iter: {iteration}, lr: {lr_0}, Acc on test data: {test_acc_iter}  ")
         else: # cyclical learning rate, non-zero temperature
             lr = cyclical_lr_schedule(lr_0, epoch - start_sampling, cycle_length)
             model.sgmcmc_update(img_batch, label_batch, train_full_size,
                                 lr=lr, beta=beta, temperature=1.)
-            # acc = model.eval_accuracy(img_batch, label_batch)s
-            # print(f"Epoch: {epoch}, Iter: {iteration}, lr: {lr}, Acc: {acc}  ")
-        iteration += 1
 
     if epoch < start_sampling:
         lr_current = lr_0
     else:
         lr_current = lr
-        # acc = model.eval_accuracy(img_batch, label_batch)
-        # print(f"Epoch: {epoch}, Iter: {iteration}, lr: {lr_0}, Batch Acc: {acc}  ")
-    train_acc = model.eval_test_all(ds_train)
-    print(f"On training data, Epoch: {epoch},  lr: {lr_current}, Total Acc: {train_acc}  ")
-    test_acc = model.eval_test_all(ds_test)
-    print(f"On test data, Epoch: {epoch},  lr: {lr_current}, Total Acc: {test_acc}  ")
-    print(" ")
+    if (epoch + 1) % 1 == 0:
+        train_acc = model.eval_test_all(ds_train)
+        print(f"On training data, Epoch: {epoch},  lr: {lr_current}, Total Acc: {train_acc}  ")
+        test_acc = model.eval_test_all(ds_test)
+        print(f"On test data, Epoch: {epoch},  lr: {lr_current}, Total Acc: {test_acc}  ")
+        print(" ")
 
 
 
