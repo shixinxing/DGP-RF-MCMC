@@ -54,10 +54,10 @@ class DGP_RF(tf.Module):
             before_n_rf = tf.concat([[self.d_in], [n_gp + self.d_in for n_gp in self.n_gp[:-1]]], axis=0)
         for i, kernel_type in enumerate(self.kernel_type_list):
             if kernel_type == 'RBF':
-                kernel = RBFKernel(n_feature=before_n_rf[i], trainable=True, is_ard=True)
+                kernel = RBFKernel(n_feature=before_n_rf[i], trainable=True, is_ard=True, length_scale=None)
                 kernel_list.append(kernel)
             elif kernel_type == 'ARC':
-                kernel = ARCKernel(n_feature=before_n_rf[i], trainable=True, is_ard=True)
+                kernel = ARCKernel(n_feature=before_n_rf[i], trainable=True, is_ard=True, length_scale=None)
                 kernel_list.append(kernel)
             else:
                 raise NotImplementedError
