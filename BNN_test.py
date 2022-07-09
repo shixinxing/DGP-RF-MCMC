@@ -115,12 +115,13 @@ class BNNTestBase(tf.Module):
 class BNNTest(BNNTestBase):
     def __init__(self):
         super(BNNTest, self).__init__()
-        self.w1 = tf.Variable(tf.random.normal([28*28, 1000]))
-        self.b1 = tf.Variable(tf.random.normal([1000]))
-        self.w2 = tf.Variable(tf.random.normal([1000, 100]))
-        self.b2 = tf.Variable(tf.random.normal([100]))
-        self.w3 = tf.Variable(tf.random.normal([100,10]))
-        self.b3 = tf.Variable(tf.random.normal([10]))
+        # Initialization schedule often used in NNs
+        self.w1 = tf.Variable(tf.random.normal([28*28, 1000])/tf.math.sqrt(1000.))
+        self.b1 = tf.Variable(tf.random.normal([1000])/tf.math.sqrt(1000.))
+        self.w2 = tf.Variable(tf.random.normal([1000, 100])/tf.math.sqrt(100.))
+        self.b2 = tf.Variable(tf.random.normal([100])/tf.math.sqrt(1000.))
+        self.w3 = tf.Variable(tf.random.normal([100,10])/tf.math.sqrt(10.))
+        self.b3 = tf.Variable(tf.random.normal([10])/tf.math.sqrt(10.))
 
 
     def __call__(self, X):
