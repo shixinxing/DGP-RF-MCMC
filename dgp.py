@@ -7,7 +7,8 @@ from utils import BNN_from_list, BNN_from_list_input_cat, log_gaussian
 
 class DGP_RF(tf.Module):
     def __init__(self, d_in, d_out, n_hidden_layers=1, n_rf=20, n_gp=2, likelihood=Softmax(),
-                 kernel_type_list=None, random_fixed=True, input_cat=False, set_nonzero_mean=False, name=None):
+                 kernel_type_list=None, random_fixed=True, input_cat=False, set_nonzero_mean=False,
+                 kernel_trainable=True, name=None):
         """
         :param d_in: Input dim
         :param d_out: Output dim
@@ -26,6 +27,7 @@ class DGP_RF(tf.Module):
         self.random_fixed = random_fixed
         self.input_cat = input_cat
         self.set_nonzero_mean = set_nonzero_mean
+        self.kernel_trainable = kernel_trainable
 
         if tf.rank(n_rf) == 0:
             self.n_rf = n_rf * tf.ones([n_hidden_layers], dtype=tf.int32) #[20, 20]
@@ -38,8 +40,8 @@ class DGP_RF(tf.Module):
 
         self.likelihood = likelihood
         if kernel_type_list is None:
-            self.kernel_type_list = ['RBF' for _ in range(n_hidden_layers)]
-            # self.kernel_type_list = ['ARC' for _ in range(n_hidden_layers)]
+            # self.kernel_type_list = ['RBF' for _ in range(n_hidden_layers)]
+            self.kernel_type_list = ['ARC' for _ in range(n_hidden_layers)]
         else:
             assert len(kernel_type_list) == n_hidden_layers, "Kernel type list's length does not match!"
             self.kernel_type_list = kernel_type_list
@@ -54,10 +56,12 @@ class DGP_RF(tf.Module):
             before_n_rf = tf.concat([[self.d_in], [n_gp + self.d_in for n_gp in self.n_gp[:-1]]], axis=0)
         for i, kernel_type in enumerate(self.kernel_type_list):
             if kernel_type == 'RBF':
-                kernel = RBFKernel(n_feature=before_n_rf[i], trainable=True, is_ard=True, length_scale=None)
+                kernel = RBFKernel(n_feature=before_n_rf[i], trainable=self.kernel_trainable,
+                                   is_ard=True, length_scale=None)
                 kernel_list.append(kernel)
             elif kernel_type == 'ARC':
-                kernel = ARCKernel(n_feature=before_n_rf[i], trainable=True, is_ard=True, length_scale=None)
+                kernel = ARCKernel(n_feature=before_n_rf[i], trainable=self.kernel_trainable,
+                                   is_ard=True, length_scale=None)
                 kernel_list.append(kernel)
             else:
                 raise NotImplementedError
