@@ -3,7 +3,7 @@ import tensorflow as tf
 
 
 class ARCKernel(tf.Module):
-    def __init__(self, n_feature=1, amplitude=1., length_scale=1., trainable=True, is_ard=False, degree=1, name=None):
+    def __init__(self, n_feature=1, amplitude=1., length_scale=None, trainable=True, is_ard=False, degree=1, name=None):
         """
         :param n_feature: the last dim of input
         :param length_scale: can be a scalar or vector
@@ -15,6 +15,9 @@ class ARCKernel(tf.Module):
         else:
             raise NotImplementedError
         self.n_feature = n_feature
+        # initialize length scale to \sqrt(d_in)
+        if length_scale is None:
+            length_scale = tf.cast(n_feature, tf.float32) ** 0.5
 
         if tf.rank(length_scale) >= 2: # not a vector
             raise ValueError("The length scale of RBF dim error!")
@@ -27,8 +30,14 @@ class ARCKernel(tf.Module):
                 raise ValueError("The size of length scale and features do not match!")
             else:
                 self.is_ard = True
+                if self.is_ard != is_ard:
+                    print(f"Arg is_ard={is_ard} does not match the length_scale!")
+                    print(f"Already set is_ard={self.is_ard}")
         else:
             self.is_ard = False
+            if self.is_ard != is_ard:
+                print(f"Arg is_ard={is_ard} does not match the length_scale!")
+                print(f"Already set is_ard={self.is_ard}")
 
         self.log_amplitude = tf.Variable(tf.math.log(amplitude), trainable=trainable, name="log_amplitude")
         self.log_inv_length_scale = tf.Variable(tf.math.log(inv_length_scale), trainable=trainable,
@@ -45,3 +54,4 @@ class ARCKernel(tf.Module):
     @property
     def inv_length_scale(self):
         return tf.math.exp(self.log_inv_length_scale)
+

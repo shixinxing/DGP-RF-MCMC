@@ -1,13 +1,13 @@
 import numpy as np
 import tensorflow as tf
-# import tensorflow_probability as tfp
+
 
 class RBFKernel(tf.Module):
     def __init__(self, n_feature=1, amplitude=1., length_scale=None, trainable=True, is_ard=False, name=None):
         """
         k(x, y) = amplitude**2 * exp(-||x - y||**2 / (2 * length_scale**2))
         :param n_feature: the last dim of input
-        :param length_scale: can be a scalar or vector
+        :param length_scale: can be a scalar or vector or None (default)
         """
         super(RBFKernel,self).__init__(name=name)
         self.kernel_type = "RBF"
@@ -27,8 +27,14 @@ class RBFKernel(tf.Module):
                 raise ValueError("The size of length scale and features do not match!")
             else:
                 self.is_ard = True
+                if self.is_ard != is_ard:
+                    print(f"Arg is_ard={is_ard} does not match the length_scale!")
+                    print(f"Already set is_ard={self.is_ard}")
         else:
             self.is_ard = False
+            if self.is_ard != is_ard:
+                print(f"Arg is_ard={is_ard} does not match the length_scale!")
+                print(f"Already set is_ard={self.is_ard}")
 
         self.log_amplitude = tf.Variable(tf.math.log(amplitude), trainable=trainable, name="log_amplitude")
         self.log_inv_length_scale = tf.Variable(tf.math.log(inv_length_scale), trainable=trainable,
@@ -45,3 +51,4 @@ class RBFKernel(tf.Module):
     @property
     def inv_length_scale(self):
         return tf.math.exp(self.log_inv_length_scale)
+
