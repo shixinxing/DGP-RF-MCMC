@@ -10,7 +10,10 @@ class Gaussian(tf.Module):
         """
         super().__init__()
         self.lik_log_var = tf.Variable(tf.math.log(variance), trainable=trainable, name="lik_log_var")
-        self.variance = tf.math.exp(self.lik_log_var)
+
+    @property
+    def variance(self):
+        return tf.math.exp(self.lik_log_var)
 
     def log_prob(self, F, Y):
         """
@@ -20,6 +23,3 @@ class Gaussian(tf.Module):
         """
         log_each_D = log_gaussian(Y, mean=F, var=self.variance)
         return tf.reduce_sum(log_each_D, axis=-1)
-
-
-
