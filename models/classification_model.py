@@ -14,7 +14,7 @@ class ClassificationDGP(DGP_RF):
                                                 random_fixed=random_fixed, kernel_trainable=kernel_trainable,
                                                 set_nonzero_mean=set_nonzero_mean, name=name)
 
-    def eval_accuracy(self, X_batch, Y_batch):
+    def eval_batch_accuracy(self, X_batch, Y_batch):
         """
         :param X_batch: [N, D]
         :param Y_batch: [N, 1]
@@ -29,12 +29,12 @@ class ClassificationDGP(DGP_RF):
         acc = right / tf.cast(tf.shape(X_batch)[0], tf.float32)
         return acc
 
-    def eval_test_all(self, ds_test):
+    def eval_all_accuracy(self, ds_test):
         right = 0.
         test_size = 0.
         for img_batch, label_batch in ds_test:
             batch_size = tf.cast(tf.shape(img_batch)[0], tf.float32)
-            right += self.eval_accuracy(img_batch, label_batch) * batch_size
+            right += self.eval_batch_accuracy(img_batch, label_batch) * batch_size
             test_size += batch_size
         # print(f"Total rights: {right}, test size: {test_size} ")
         acc_test_all = right / test_size
@@ -42,6 +42,19 @@ class ClassificationDGP(DGP_RF):
 
     def eval_test_free_random(self,ds_test):
         self.BNN.set_random_fixed(False)
-        acc =  self.eval_test_all(ds_test)
+        acc =  self.eval_all_accuracy(ds_test)
         self.BNN.set_random_fixed(True)
         return acc
+
+    def eval_log_likelihood(self, ds):
+        """
+        :param ds:iterable X: [N, D_in]; Y: [N, D_out];
+        :return: output matrix of log likelihood log p(Y|F), shape [N, ] without square errors [N, ]
+        """
+        log_p_all_data = []
+        for x_batch, y_batch in ds:
+            out_before_likelihood = self.BNN(x_batch)
+            log_p_batch = self.likelihood.log_prob(out_before_likelihood, y_batch)
+            log_p_all_data.append(log_p_batch)
+        log_p_all_data = tf.concat(log_p_all_data, axis=0)
+        return log_p_all_data
