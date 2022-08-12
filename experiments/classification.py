@@ -1,93 +1,83 @@
-import sys
-sys.path.append("..")
+import numpy as np
 import tensorflow as tf
 
-from dgp import DGP_RF
+import sys
+sys.path.append("..")
+
+from models.classification_model import ClassificationDGP
 from likelihoods import Softmax
-from utils_dataset import load_dataset, normalize_MNIST
-from utils import cyclical_lr_schedule
+from utils_dataset import load_tf_dataset, normalize_MNIST
+from utils import cyclical_step_rate
 
 
-class ClassificationDGP(DGP_RF):
-    def __init__(self, d_in, d_out, n_hidden_layers=1, n_rf=30, n_gp=10, likelihood=Softmax(),
-                 kernel_type_list=None, random_fixed=True, input_cat=False, set_nonzero_mean=False, name=None):
-        super(ClassificationDGP, self).__init__(d_in, d_out, n_hidden_layers=n_hidden_layers,
-                                                n_rf=n_rf, n_gp=n_gp, likelihood=likelihood,
-                                                kernel_type_list=kernel_type_list, input_cat=input_cat,
-                                                random_fixed=random_fixed, set_nonzero_mean=set_nonzero_mean, name=name)
-
-    def eval_accuracy(self, X_batch, Y_batch):
-        """
-        :param X_batch: [N, D]
-        :param Y_batch: [N, 1]
-        :return: acc give one sample set of params in BNN
-        """
-        out = self.BNN(X_batch)
-        out = self.likelihood.predict_full(out) #[N, num_class], float32
-        predicts = tf.cast(tf.math.argmax(out, axis=-1), tf.float32) #[N], int
-        labels = tf.squeeze(Y_batch) #[N], float
-        right_index = tf.cast(predicts == labels, tf.float32)
-        right = tf.reduce_sum(right_index)
-        acc = right / tf.cast(tf.shape(X_batch)[0], tf.float32)
-        return acc
-
-    def eval_test_all(self, ds_test):
-        right = 0.
-        test_size = 0.
-        for img_batch, label_batch in ds_test:
-            batch_size = tf.cast(tf.shape(img_batch)[0], tf.float32)
-            right += self.eval_accuracy(img_batch, label_batch) * batch_size
-            test_size += batch_size
-        # print(f"Total rights: {right}, test size: {test_size} ")
-        acc_test_all = right / test_size
-        return  acc_test_all
-
-    def eval_test_free_random(self,ds_test):
-        self.BNN.set_random_fixed(False)
-        acc =  self.eval_test_all(ds_test)
-        self.BNN.set_random_fixed(True)
-        return acc
-
-
-batch_size = 256
-ds_train, ds_test, train_full_size, test_full_size = load_dataset('mnist', batch_size=batch_size,
+batch_size = 200
+ds_train, ds_test, train_full_size, test_full_size = load_tf_dataset('mnist', batch_size=batch_size,
                                                                   transform_fn=normalize_MNIST)
 ds_M = ds_train
-model = ClassificationDGP(28*28, 10, n_hidden_layers=3, n_rf=500, n_gp=[50, 50, 10], likelihood=Softmax(),
-                          kernel_type_list=None, random_fixed=True, set_nonzero_mean=False, input_cat=True)
+d_in = 28 * 28
+d_out = 10
+model = ClassificationDGP(d_in, d_out, n_hidden_layers=2, n_rf=200, n_gp=[30, 10], likelihood=Softmax(),
+                          kernel_type_list=['RBF','RBF'], random_fixed=True,
+                          kernel_trainable=True ,set_nonzero_mean=False, input_cat=True)
+print(f"Kernel type in the model is {model.kernel_type_list}")
 
-total_epoches = 20
-start_sampling = 20
-lr_0 = 0.1  # Training acc reaches over 95% very fast.
+total_epochs = 10000
+start_sampling_epoch = 2000 #maybe use this as mixing or warming up ???
+lr_0 = 0.01
 beta = 0.98
-cycle_length = 100
+epochs_per_cycle = 50
+iterations_per_epoch = int(np.ceil(train_full_size / batch_size))
+cycle_length = epochs_per_cycle * iterations_per_epoch #number of iterations in one period
 
-for epoch in range(total_epoches):
-    model.precond_update(ds_M, train_full_size, K_batches=32, precond_type='rmsprop', rho_rms=0.99)
-    acc = 0.
+print_epoch_cycle = 20
+log_p = []
+acc = []
+for epoch in range(total_epochs):
+    model.precond_update(ds_M, train_full_size, K_batches=32, precond_type='rmsprop', second_moment_centered=False)
+    batch_index = 0
     for img_batch, label_batch in ds_train:
-        if epoch < start_sampling: # fixed learning rate, zero temperature
+        batch_index = batch_index + 1
+        if epoch < start_sampling_epoch: # fixed learning rate, zero temperature
             model.sgmcmc_update(img_batch, label_batch, train_full_size,
-                                lr=lr_0, beta=beta, temperature=0.)
+                                lr=lr_0, momentum_decay=beta,
+                                resample_moments=False, temperature=0.)
         else: # cyclical learning rate, non-zero temperature
-            lr = cyclical_lr_schedule(lr_0, epoch - start_sampling, cycle_length)
+            step_index = (epoch - start_sampling_epoch) * iterations_per_epoch + batch_index
+            step_rate, is_end = cyclical_step_rate(step_index, cycle_length, schedule='cosine', min_value=0.)
+            lr = lr_0 * (step_rate**2)
+            is_new_cycle = tf.equal(tf.math.mod(step_index, cycle_length), 1)
             model.sgmcmc_update(img_batch, label_batch, train_full_size,
-                                lr=lr, beta=beta, temperature=1.)
-
-    if epoch < start_sampling:
-        lr_current = lr_0
-    else:
-        lr_current = lr
-    if (epoch + 1) % 1 == 0:
-        train_acc = model.eval_test_all(ds_train)
-        print(f"On training data, Epoch: {epoch},  lr: {lr_current}, Total Acc: {train_acc}  ")
-        test_acc = model.eval_test_all(ds_test)
-        print(f"On test data, Epoch: {epoch},  lr: {lr_current}, Total Acc: {test_acc}  ")
+                                lr=lr, momentum_decay=beta,
+                                resample_moments=is_new_cycle, temperature=1.)
+            if is_end: # sampling the model
+                test_log_p = model.eval_log_likelihood(ds_test)
+                test_acc = model.eval_all_accuracy(ds_test)
+                log_p.append(test_log_p)
+                acc.append(test_acc)
+                print('#' * 20, f'Sampling at Epoch {epoch} ', f"lr = {lr}", '#' * 20)
+    # print sampling process
+    if (epoch + 1) % print_epoch_cycle == 0:
+        train_log_p = model.eval_log_likelihood(ds_train)
+        test_log_p = model.eval_log_likelihood(ds_test)
+        train_acc = model.eval_all_accuracy(ds_train)
+        test_acc = model.eval_all_accuracy(ds_test)
+        print(f"Epoch: {epoch}")
+        print(f"Mean Log Likelihood -- train: {tf.reduce_mean(train_log_p)}, "
+              f"-- test: {tf.reduce_mean(test_log_p)} ")
+        print(f"Accuracy -- train: {train_acc}, "
+              f"-- test: {test_acc} ")
         print(" ")
 
+log_p = tf.stack(log_p, axis=0) # [S, N]
+acc = tf.stack(acc, axis=0) #[S,]
 
+n_models = tf.shape(acc)[0]
+predict_log_p = tf.reduce_logsumexp(log_p, axis=0) - tf.math.log(tf.cast(n_models, tf.float32))
+predict_log_p = tf.reduce_mean(predict_log_p)
+predict_acc = tf.reduce_mean(acc)
 
-
-
+print(f"Number of sampled models: {n_models} ")
+print(f"Test Log Likelihood of all sampled models: {predict_log_p}")
+print(f"Test Mean acc of all sampled models: {predict_acc}")
 
 
