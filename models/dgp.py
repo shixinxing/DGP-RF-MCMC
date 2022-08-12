@@ -34,10 +34,12 @@ class DGP_RF(tf.Module):
             self.n_rf = n_rf * tf.ones([n_hidden_layers], dtype=tf.int32) #[20, 20]
         else:
             self.n_rf = tf.constant(n_rf, dtype=tf.int32)
+        assert tf.size(self.n_rf) == self.n_hidden_layers, "Error in #random feature layers!"
         if tf.rank(n_gp) == 0:
             self.n_gp = n_gp * tf.ones([n_hidden_layers], dtype=tf.int32) #[2, 2]
         else:
             self.n_gp = tf.constant(n_gp, dtype=tf.int32)
+        assert tf.size(self.n_gp) == self.n_hidden_layers, "Error in #hidden GP layers!"
 
         self.likelihood = likelihood
         if kernel_type_list is None:
@@ -219,13 +221,15 @@ class DGP_RF(tf.Module):
 
                 k = k + 1
                 for param, grad in zip(self.trainable_variables, grads):
-                    if not hasattr(param, 'm2_pre'): # auxiliary moments in Welford
+                    if not hasattr(param, 'm2_pre'): # add auxiliary moments in Welford
+                        param.m2_pre = None
+                    if not hasattr(param, 'mean_pre'):
+                        param.mean_pre = None
+                    if k == 1: # initial auxiliary moments in Welford to zeros
                         param.m2_pre = tf.zeros_like(param, dtype=tf.float32)
-                    if not hasattr(param, 'mean_pre'): #
                         param.mean_pre = tf.zeros_like(param, dtype=tf.float32)
-
                     delta = grad - param.mean_pre
-                    param.mean_pre = param.mean_pre + delta / k #update gradient mean over batched
+                    param.mean_pre = param.mean_pre + delta / k #update gradient mean over batches
                     delta2 = grad - param.mean_pre
                     param.m2_pre = param.m2_pre + delta * delta2 #update auxiliary moments
                 if k == K_batches:
@@ -245,7 +249,6 @@ class DGP_RF(tf.Module):
                     mass_estimate_sq = tf.math.square(param.mean_pre) + variance_esitmate
                     mass_estimate_sq = tf.reduce_mean(mass_estimate_sq)
                     param.mass_estimate = tf.math.sqrt(mass_estimate_sq + DEFAULT_REGULARIZATION)
-
                 if mass_min is None:
                     mass_min = param.mass_estimate
                 elif param.mass_estimate < mass_min:
@@ -257,3 +260,4 @@ class DGP_RF(tf.Module):
             return None
         else:
             raise NotImplementedError
+
