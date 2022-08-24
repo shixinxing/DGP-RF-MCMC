@@ -29,6 +29,7 @@ class DGP_RF(tf.Module):
         self.input_cat = input_cat
         self.set_nonzero_mean = set_nonzero_mean
         self.kernel_trainable = kernel_trainable
+        self.likelihood = likelihood
 
         if tf.rank(n_rf) == 0:
             self.n_rf = n_rf * tf.ones([n_hidden_layers], dtype=tf.int32) #[20, 20]
@@ -41,7 +42,6 @@ class DGP_RF(tf.Module):
             self.n_gp = tf.constant(n_gp, dtype=tf.int32)
         assert tf.size(self.n_gp) == self.n_hidden_layers, "Error in #hidden GP layers!"
 
-        self.likelihood = likelihood
         if kernel_type_list is None:
             self.kernel_type_list = ['RBF' for _ in range(n_hidden_layers)]
             # self.kernel_type_list = ['ARC' for _ in range(n_hidden_layers)]
@@ -50,6 +50,26 @@ class DGP_RF(tf.Module):
             self.kernel_type_list = kernel_type_list
         self.kernel_list = self.transform_kernel_list()
         self.BNN = self.transformed_BNN()
+
+    @property
+    def Likelihood_hyperparams(self):
+        return list(self.likelihood.trainable_variables)
+
+    @property
+    def Omega_hyperparams(self):
+        params = []
+        for l in range(self.n_hidden_layers):
+            layer_param = list(self.BNN.layers[2 * l].trainable_variables)
+            params.extend(layer_param)
+        return params # also return list type
+
+    @property
+    def W_mcmc(self):
+        return [self.BNN.layers[2 * l + 1].trainable_variables[0] for l in range(self.n_hidden_layers)]
+
+    def assign_W(self, W_value_list):
+        for gp_layer, W_value in zip(self.BNN.gp_layers, W_value_list):
+            gp_layer.assign_W(W_value)
 
     def transform_kernel_list(self):
         kernel_list = []
@@ -95,19 +115,14 @@ class DGP_RF(tf.Module):
             return BNN_from_list_input_cat(bnn)
         # else: # add input concatenation
 
-    def set_random_fixed(self, state):
-        for l in range(self.n_hidden_layers):
-            rf_layer = self.BNN.layers[2 * l]
-            rf_layer.set_random_fixed(state)
-
-    def log_likelihood(self, X, Y):
+    def log_likelihood(self, X, Y, allow_gradient_from_W=True):
         """
         Compute log likelihood given all params \log p(D|all params) by feeding forward
         :param X: [N, D]
         :param Y: [N, D_out]
         :return: [N, ]
         """
-        F = self.BNN(X)
+        F = self.BNN(X, allow_gradient_from_W=allow_gradient_from_W)
         log_likelihood = self.likelihood.log_prob(F, Y)
         return log_likelihood
 
@@ -116,11 +131,8 @@ class DGP_RF(tf.Module):
         :return: \log p(W) ~ N(0, I)
         """
         log_p_W = 0.
-        for l in range(self.n_hidden_layers):
-            gp_layer = self.BNN.layers[2 * l + 1]
-            w_l = gp_layer.trainable_variables #return a tuple
-            for var in w_l:
-                log_p_W += tf.reduce_sum(log_gaussian(var, mean=0., var=1.))
+        for  w_l in self.W_mcmc:
+            log_p_W += tf.reduce_sum(log_gaussian(w_l, mean=0., var=1.))
         return log_p_W
 
     def prior_kernel_params(self):
@@ -146,7 +158,7 @@ class DGP_RF(tf.Module):
         else:
             raise NotImplementedError
 
-    def U(self, X_batch, Y_batch, data_size):
+    def U(self, X_batch, Y_batch, data_size, full_bayesian=False, allow_gradient_from_W=True):
         """
         minibatch average potential energy per sample: -(1/M) \sum_{i=1}^M log p(y_i|x_i,w) - (1/N) log p(w)
         :param data_size: N
@@ -154,15 +166,23 @@ class DGP_RF(tf.Module):
         batch_size = tf.shape(X_batch)[0]
         batch_size = tf.cast(batch_size, tf.float32)
         data_size = tf.cast(data_size, tf.float32)
-        # log_prior_sum = (self.prior_W() + self.prior_kernel_params() + self.prior_likelihood_params()) / data_size
-        log_prior_sum = 0.
-        for param in self.trainable_variables:
-            log_prior_sum += tf.reduce_sum(log_gaussian(param, mean=0., var=1.)) / data_size
-        log_likelihood = tf.reduce_sum(self.log_likelihood(X_batch, Y_batch)) / batch_size
+        if full_bayesian == False: # regard kenrel params and likelihood params as hyper-params:
+            if allow_gradient_from_W:
+                log_prior_sum = self.prior_W() / data_size
+            else:
+                log_prior_sum = 0. # fixing W, their priors are not related to Omegas
+            log_likelihood = tf.reduce_sum(self.log_likelihood(X_batch, Y_batch, allow_gradient_from_W=allow_gradient_from_W)) / batch_size
+        else: # Or full Bayesian way:
+            assert allow_gradient_from_W == True, "Full Bayes should allow gradients from W!"
+            # log_prior_sum = (self.prior_W() + self.prior_kernel_params() + self.prior_likelihood_params())/data_size
+            log_prior_sum = 0.
+            for param in self.trainable_variables:
+                log_prior_sum += tf.reduce_sum(log_gaussian(param, mean=0., var=1.)) / data_size
+            log_likelihood = tf.reduce_sum(self.log_likelihood(X_batch, Y_batch)) / batch_size
         return - (log_prior_sum + log_likelihood)
 
     def sgmcmc_update(self, X_batch, Y_batch, data_size, lr=0.01, momentum_decay=0.95,
-                      resample_moments=False, temperature=1.):
+                      resample_moments=False, temperature=1., full_bayesian=False):
         """
         implement one step of SGHMC and SGLD fore each group of params;
         :param lr: here the learning rate is the instantaneous effect of the average-minibatch-gradient
@@ -170,23 +190,33 @@ class DGP_RF(tf.Module):
         :param momentum_decay: i.e. beta, in the range [0,1), when beta=0, equal to SGLD
         typically close to 1, e.g. values such as 0.75, 0.8, 0.9, 0.95.
         """
-        with tf.GradientTape() as tape:
-            U = self.U(X_batch, Y_batch, data_size)
-        grads = tape.gradient(U, self.trainable_variables)
+        if full_bayesian == False:
+            with tf.GradientTape(watch_accessed_variables=False) as tape:
+                tape.watch(self.W_mcmc)
+                U = self.U(X_batch, Y_batch, data_size,
+                           full_bayesian=False, allow_gradient_from_W=True)
+            grads = tape.gradient(U, tape.watched_variables())
+        else:
+            with tf.GradientTape(watch_accessed_variables=False) as tape:
+                tape.watch(self.trainable_variables)
+                U = self.U(X_batch, Y_batch, data_size,
+                           full_bayesian=True, allow_gradient_from_W=True)
+            grads = tape.gradient(U, tape.watched_variables())
 
         h = tf.sqrt(lr / data_size)
-        for param, grad in zip(self.trainable_variables, grads):
+        for param, grad in zip(tape.watched_variables(), grads):
             assert hasattr(param, "moments"), "Trainable Params do not have attr moments!"
             if resample_moments:
-                param.moments = tf.random.normal(tf.shape(param))
+                param.moments = tf.random.normal(tf.shape(param), mean=0., stddev=1.)
             m_new = momentum_decay * param.moments - h * data_size * grad
-            eps = tf.random.normal(tf.shape(param))
+            eps = tf.random.normal(tf.shape(param), mean=0., stddev=1.)
             assert hasattr(param, "M"), "Trainable Params do not have attr preconditioner M!"
             m_new = m_new + tf.math.sqrt(2.0 * (1. - momentum_decay) * temperature * param.M) * eps
             param.moments = m_new
             param.assign_add(h * tf.math.reciprocal(param.M) * param.moments)
 
-    def precond_update(self, ds, data_size, K_batches=32, precond_type='rmsprop', second_moment_centered=False):
+    def precond_update(self, ds, data_size, K_batches=32, full_bayesian=False,
+                       precond_type='rmsprop', second_moment_centered=False):
         """
         update the preconditioner M based on computing the gradients of mini-batches.
         :param ds: tf.data.Dataset as Iterable
@@ -197,16 +227,21 @@ class DGP_RF(tf.Module):
         :return: preconditioner M w.r.t each param
         """
         # add attributes "moments" and preconditioner "M" to each group of variables
-        for param in self.trainable_variables:
+        if full_bayesian == False:
+            vars = self.W_mcmc
+        else:
+            vars = self.trainable_variables
+
+        for param in vars:
             if not hasattr(param, "M"):
                 param.M = tf.constant(1., dtype=tf.float32)
             if not hasattr(param, "moments"):
                 # param.moments = tf.zeros_like(param)
-                param.moments = tf.random.normal(tf.shape(param))
+                param.moments = tf.random.normal(tf.shape(param), mean=0., stddev=1.)
         if precond_type == 'identity':
             return None
         elif precond_type == 'rmsprop':
-            for param in self.trainable_variables:
+            for param in vars:
                 if not hasattr(param, "m_c"):
                     param.m_c = None
                 param.m_c = tf.math.rsqrt(param.M) * param.moments
@@ -215,12 +250,14 @@ class DGP_RF(tf.Module):
             DEFAULT_REGULARIZATION = 1.0e-7
             k = 0
             for X_batch, Y_batch in ds:
-                with tf.GradientTape() as tape:
-                    U_pre = self.U(X_batch, Y_batch, data_size)
-                grads = tape.gradient(U_pre, self.trainable_variables)
+                with tf.GradientTape(watch_accessed_variables=False) as tape:
+                    tape.watch(vars)
+                    U_pre = self.U(X_batch, Y_batch, data_size,
+                                   full_bayesian=full_bayesian,allow_gradient_from_W=True)
+                grads = tape.gradient(U_pre, tape.watched_variables())
 
                 k = k + 1
-                for param, grad in zip(self.trainable_variables, grads):
+                for param, grad in zip(vars, grads):
                     if not hasattr(param, 'm2_pre'): # add auxiliary moments in Welford
                         param.m2_pre = None
                     if not hasattr(param, 'mean_pre'):
@@ -237,7 +274,7 @@ class DGP_RF(tf.Module):
             assert k == K_batches, f"Estimating M ends before we use {K_batches} batches, we actually use {k} batches!"
             # estimate the mass w.r.t each trainable variable
             mass_min = None
-            for param in self.trainable_variables:
+            for param in vars:
                 if not hasattr(param, 'mass_estimate'):
                     param.mass_estimate = tf.zeros([], dtype=tf.float32)
                 if second_moment_centered: #estimate gradient variance
@@ -254,10 +291,14 @@ class DGP_RF(tf.Module):
                 elif param.mass_estimate < mass_min:
                     mass_min = param.mass_estimate
             # scale the minimum estimated mass to one
-            for param in self.trainable_variables:
+            for param in vars:
                 param.M = param.mass_estimate / mass_min
                 param.moments = tf.math.sqrt(param.M) * param.m_c
             return None
         else:
             raise NotImplementedError
 
+    def set_random_fixed(self, state):
+        for l in range(self.n_hidden_layers):
+            rf_layer = self.BNN.layers[2 * l]
+            rf_layer.set_random_fixed(state)
