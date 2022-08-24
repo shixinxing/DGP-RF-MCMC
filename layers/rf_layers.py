@@ -7,7 +7,6 @@ class RBFLayer(tf.Module):
         """
         :param kernel: RBFKernel class
         :param out_feature: Number of sampled \Omegas
-        :param input_cat_dims: None: no input concatenate, otherwise it is the additional dimensions
         """
         super(RBFLayer, self).__init__(name=name)
         assert isinstance(kernel, RBFKernel), "Input kernel is not RBF!"
@@ -15,8 +14,9 @@ class RBFLayer(tf.Module):
         self.in_feature = kernel.n_feature
         self.out_feature = out_feature
         self.n_rf = 2 * out_feature
-        self.amplitude = kernel.amplitude
-        self.inv_length_scale = kernel.inv_length_scale
+        # Do not use the following
+        # self.amplitude = self.kernel.amplitude
+        # self.inv_length_scale = self.kernel.inv_length_scale
         self.random_fixed = random_fixed
         if random_fixed: # when training
             self.z = tf.random.normal([self.in_feature, self.out_feature])
@@ -33,15 +33,15 @@ class RBFLayer(tf.Module):
         """
         if self.random_fixed:
             if not self.kernel.is_ard:
-                Omega  = self.inv_length_scale * self.z + self.mean
+                Omega  = self.kernel.inv_length_scale * self.z + self.mean
             else: # is ard
-                Omega = tf.expand_dims(self.inv_length_scale, axis=-1) * self.z + self.mean
+                Omega = tf.expand_dims(self.kernel.inv_length_scale, axis=-1) * self.z + self.mean
         else:  # not self.random_fixed:
             z_resampled = tf.random.normal([self.in_feature, self.out_feature])
-            Omega = tf.expand_dims(self.inv_length_scale, axis=-1) * z_resampled + self.mean
+            Omega = tf.expand_dims(self.kernel.inv_length_scale, axis=-1) * z_resampled + self.mean
         inner_prod = tf.linalg.matmul(X, Omega)
         random_feature = tf.concat([tf.math.cos(inner_prod), tf.math.sin(inner_prod)], axis=-1)
-        random_feature = self.amplitude / tf.sqrt(tf.cast(self.out_feature, tf.float32)) * random_feature
+        random_feature = self.kernel.amplitude / tf.sqrt(tf.cast(self.out_feature, tf.float32)) * random_feature
         return  random_feature
 
     def set_random_fixed(self, state):
@@ -61,8 +61,9 @@ class ARCLayer(tf.Module):
         self.in_feature = kernel.n_feature
         self.out_feature = out_feature
         self.n_rf = out_feature
-        self.amplitude = kernel.amplitude
-        self.inv_length_scale = kernel.inv_length_scale
+        # Do not use the following
+        # self.amplitude = self.amplitude
+        # self.inv_length_scale = self.inv_length_scale
         self.random_fixed = random_fixed
         if random_fixed: # when training
             self.z = tf.random.normal([self.in_feature, self.out_feature])
@@ -78,15 +79,15 @@ class ARCLayer(tf.Module):
         """
         if self.random_fixed:
             if not self.kernel.is_ard:
-                Omega  = self.inv_length_scale * self.z + self.mean
+                Omega  = self.kernel.inv_length_scale * self.z + self.mean
             else: # is ard
-                Omega = tf.expand_dims(self.inv_length_scale, axis=-1) * self.z + self.mean
+                Omega = tf.expand_dims(self.kernel.inv_length_scale, axis=-1) * self.z + self.mean
         else:  # not self.random_fixed:
             z_resampled = tf.random.normal([self.in_feature, self.out_feature])
-            Omega = tf.expand_dims(self.inv_length_scale, axis=-1) * z_resampled + self.mean
+            Omega = tf.expand_dims(self.kernel.inv_length_scale, axis=-1) * z_resampled + self.mean
         inner_prod = tf.linalg.matmul(X, Omega)
         random_feature = tf.nn.relu(inner_prod)
-        random_feature = tf.sqrt(2.) * self.amplitude / tf.sqrt(tf.cast(self.out_feature, tf.float32)) * random_feature
+        random_feature = tf.sqrt(2.) * self.kernel.amplitude / tf.sqrt(tf.cast(self.out_feature, tf.float32)) * random_feature
         return  random_feature
 
     def set_random_fixed(self, state):
