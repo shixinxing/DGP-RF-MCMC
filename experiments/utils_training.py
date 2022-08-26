@@ -204,12 +204,12 @@ def MCEM(sampler_EM, maximizer, sampler_fixing_hyper, total_EM_steps, ds_train,
         if em_step == total_EM_steps:
             break
     print("#"*15,f"After {total_EM_steps} EM steps, fixing hyperparams and sample from posterior.","#"*15)
-    _, log_p, mse, = sampler_fixing_hyper(num_samples=num_samples_fixing_hyper,
+    _, log_p, mse = sampler_fixing_hyper(num_samples=num_samples_fixing_hyper,
                                           print_epoch_cycle=print_epoch_cycle_fixing)
     return log_p, mse
 
 def MCEM_windows(sampler_EM, maximizer, sampler_fixing_hyper, total_EM_steps, ds_train,
-                 num_samples_fixing_hyper=200, window_size=50,
+                 num_samples_fixing_hyper=200, window_size=300,
                  print_epoch_cycle_EM=100, print_epoch_cycle_fixing=100):
     W_samples_window = []
     log_p_window = None
@@ -221,13 +221,15 @@ def MCEM_windows(sampler_EM, maximizer, sampler_fixing_hyper, total_EM_steps, ds
         em_step += 1
         # E step
         print("#"*15, f"EM step {em_step} of total {total_EM_steps} steps. E Step: ", "#"*15)
-        if len(W_samples_window) < window_size:
-            W_samples, log_p_window, mse_window = sampler_EM(num_samples=window_size,
-                                                             print_epoch_cycle=print_epoch_cycle_EM)
-            W_samples_window.extend(W_samples)
+        W_samples, log_p, mse = sampler_EM(num_samples=1, print_epoch_cycle=print_epoch_cycle_EM)
+        W_samples_window.extend(W_samples)
+        if len(W_samples_window) == 1:
+            log_p_window = log_p
+            mse_window = mse
+        elif len(W_samples_window) <= window_size:
+            log_p_window = tf.concat([log_p_window, log_p],axis=0)
+            mse_window = tf.concat([mse_window, mse], axis=0)
         else:
-            W_samples, log_p, mse = sampler_EM(num_samples=1, print_epoch_cycle=print_epoch_cycle_EM)
-            W_samples_window.extend(W_samples)
             W_samples_window = W_samples_window[-window_size:]
             log_p_window = tf.concat([log_p_window, log_p], axis=0)[1:,:]
             mse_window = tf.concat([mse_window, mse], axis=0)[1:,:]
@@ -250,3 +252,46 @@ def MCEM_windows(sampler_EM, maximizer, sampler_fixing_hyper, total_EM_steps, ds
                                          print_epoch_cycle=print_epoch_cycle_fixing)
     return log_p, mse
 
+def MCEM_increasing_windows(sampler_EM, maximizer, sampler_fixing_hyper, total_EM_steps, ds_train,
+                 num_samples_fixing_hyper=200, window_size=300,
+                 print_epoch_cycle_EM=100, print_epoch_cycle_fixing=100):
+    W_samples_window = []
+    log_p_window = None
+    mse_window = None
+
+    ds_train_repeat = ds_train.repeat()
+    em_step = 0
+    for x_batch, y_batch in ds_train_repeat:
+        em_step += 1
+        # E step
+        print("#"*15, f"EM step {em_step} of total {total_EM_steps} steps. E Step: ", "#"*15)
+        W_samples, log_p, mse = sampler_EM(num_samples=1, print_epoch_cycle=print_epoch_cycle_EM)
+        W_samples_window.extend(W_samples)
+        if len(W_samples_window) == 1:
+            log_p_window = log_p
+            mse_window = mse
+        elif len(W_samples_window) <= window_size:
+            log_p_window = tf.concat([log_p_window, log_p],axis=0)
+            mse_window = tf.concat([mse_window, mse], axis=0)
+        else:
+            W_samples_window = W_samples_window[-window_size:]
+            log_p_window = tf.concat([log_p_window, log_p], axis=0)[1:,:]
+            mse_window = tf.concat([mse_window, mse], axis=0)[1:,:]
+        n_models = tf.shape(mse_window)[0]
+        predict_log_p = tf.reduce_logsumexp(log_p_window, axis=0) - tf.math.log(tf.cast(n_models, tf.float32))
+        predict_log_p = tf.reduce_mean(predict_log_p)
+        predict_rmse = tf.math.sqrt(tf.reduce_mean(mse_window))
+        print("*"*20," End of E step ", "*"*20)
+        print(f"Number of all sampled models in window: {n_models} ")
+        print(f"Test Log Likelihood of all models in window: {predict_log_p}")
+        print(f"Test Root MSE of all models in window: {predict_rmse}\n")
+        # M step
+        print("#"*15, f"EM step {em_step} of total {total_EM_steps} steps, M Step: ", "#"*15)
+        i = np.random.randint(len(W_samples_window))
+        maximizer([W_samples_window[i]], x_batch, y_batch)
+        if em_step == total_EM_steps:
+            break
+    print("#"*15,f"After {total_EM_steps} EM steps, fixing hyperparams and sample from posterior.","#"*15)
+    _, log_p, mse = sampler_fixing_hyper(num_samples=num_samples_fixing_hyper,
+                                         print_epoch_cycle=print_epoch_cycle_fixing)
+    return log_p, mse

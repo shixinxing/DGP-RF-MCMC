@@ -225,15 +225,16 @@ def MCEM_windows_demo(sampler_EM, maximizer, sampler_fixing_hyper, total_EM_step
         em_step += 1
         # E step
         print("#"*15, f"EM step {em_step} of total {total_EM_steps} steps. E Step: ", "#"*15)
-        if len(W_samples_window) < window_size:
-            W_samples, log_p_window, mse_window = sampler_EM(num_samples=window_size,
-                                                             return_lines_Wdict=False,
-                                                             print_epoch_cycle=print_epoch_cycle_EM)
-            W_samples_window.extend(W_samples)
+        W_samples, log_p, mse = sampler_EM(num_samples=1, return_lines_Wdict=False,
+                                           print_epoch_cycle=print_epoch_cycle_EM)
+        W_samples_window.extend(W_samples)
+        if len(W_samples_window) == 1:
+            log_p_window = log_p
+            mse_window = mse
+        elif len(W_samples_window) <= window_size:
+            log_p_window = tf.concat([log_p_window, log_p],axis=0)
+            mse_window = tf.concat([mse_window, mse], axis=0)
         else:
-            W_samples, log_p, mse = sampler_EM(num_samples=1, return_lines_Wdict=False,
-                                               print_epoch_cycle=print_epoch_cycle_EM)
-            W_samples_window.extend(W_samples)
             W_samples_window = W_samples_window[-window_size:]
             log_p_window = tf.concat([log_p_window, log_p], axis=0)[1:,:]
             mse_window = tf.concat([mse_window, mse], axis=0)[1:,:]
