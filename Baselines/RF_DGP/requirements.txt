@@ -1,0 +1,31 @@
+absl-py==1.1.0
+astor==0.8.1
+certifi @ file:///opt/conda/conda-bld/certifi_1655968806487/work/certifi
+cycler==0.11.0
+et-xmlfile==1.1.0
+gast==0.5.3
+grpcio==1.47.0
+h5py==3.7.0
+importlib-metadata==4.11.4
+Keras-Applications==1.0.8
+Keras-Preprocessing==1.1.2
+kiwisolver==1.4.3
+Markdown==3.3.7
+matplotlib==3.0.3
+mock==4.0.3
+numpy==1.21.6
+openpyxl @ file:///tmp/build/80754af9/openpyxl_1632777717936/work
+pandas==0.24.0
+protobuf==3.20.0
+pyparsing==3.0.9
+python-dateutil==2.8.2
+pytz==2022.1
+six==1.16.0
+tensorboard==1.13.1
+tensorflow==1.13.2
+tensorflow-estimator==1.13.0
+termcolor==1.1.0
+typing_extensions==4.2.0
+Werkzeug==2.1.2
+xlrd @ file:///tmp/build/80754af9/xlrd_1608072521494/work
+zipp==3.8.0
